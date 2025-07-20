@@ -1,5 +1,7 @@
 use std::{
     collections::{HashSet, VecDeque},
+    fs::create_dir_all,
+    path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
 };
@@ -9,26 +11,31 @@ use clap::Parser;
 use reqwest::Client;
 use scraper::{Html, Selector};
 use tokio::{
+    fs::File,
+    io::AsyncWriteExt,
     sync::{Mutex, Semaphore},
     task::JoinSet,
     time::interval,
 };
 use url::Url;
+use urlencoding::encode;
 
 #[derive(Parser, Debug)]
 struct Args {
     #[arg(long)]
     url: Url,
-    #[arg(long, default_value_t = 1)]
+    #[arg(long, default_value_t = 100)]
     depth_limit: usize,
     #[arg(long, default_value_t = 100)]
     concurrency_limit: usize,
     #[arg(long, default_value_t = 1000)]
     request_timeout_ms: u64,
-    #[arg(long, default_value_t = 10)]
+    #[arg(long, default_value_t = 100)]
     min_interval_ms: u64,
     #[arg(long, default_value = "Mozilla/5.0")]
     user_agent: String,
+    #[arg(long, default_value = "scraper_output")]
+    output_directory: PathBuf,
     #[arg(long)]
     verbose: bool,
 }
@@ -36,6 +43,11 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+
+    let html_directory = args.output_directory.join("html");
+    create_dir_all(&html_directory).expect("failed to create output directory");
+    let html_directory = Arc::new(html_directory);
+
     let client = Client::builder()
         .user_agent(args.user_agent)
         .timeout(Duration::from_millis(args.request_timeout_ms))
@@ -68,6 +80,7 @@ async fn main() -> Result<()> {
             let queue = queue.clone();
             let client = client.clone();
             let link_selector = link_selector.clone();
+            let html_directory = html_directory.clone();
 
             let failed_counter = failed_counter.clone();
             let success_counter = success_counter.clone();
@@ -91,7 +104,14 @@ async fn main() -> Result<()> {
                             queue.add(&urls, current_depth + 1);
                             queue.done(&url);
 
-                            if args.verbose {
+                            if let Err(err) = save_html(&html_directory, &url, &body).await {
+                                eprintln!("Failed to save html from {url}: {err}");
+
+                                if args.verbose {
+                                    let mut failed_counter = failed_counter.lock().await;
+                                    *failed_counter += 1;
+                                }
+                            } else if args.verbose {
                                 let mut success_counter = success_counter.lock().await;
                                 *success_counter += 1;
                             }
@@ -227,4 +247,14 @@ fn extract_links_from_body(body: &str, link_selector: &Selector) -> Vec<String> 
         .select(link_selector)
         .filter_map(|link| link.attr("href").map(String::from))
         .collect()
+}
+
+async fn save_html(html_directory: &Path, url: &str, html: &str) -> Result<()> {
+    let encoded_url = encode(url);
+    let file_path = html_directory.join(format!("{encoded_url}.html"));
+
+    let mut file = File::create(file_path).await?;
+    file.write_all(html.as_bytes()).await?;
+
+    Ok(())
 }
