@@ -1,6 +1,7 @@
 use std::{
     collections::{HashSet, VecDeque},
     sync::Arc,
+    time::Duration,
 };
 
 use anyhow::Result;
@@ -10,27 +11,35 @@ use scraper::{Html, Selector};
 use tokio::{
     sync::{Mutex, Semaphore},
     task::JoinSet,
+    time::interval,
 };
 use url::Url;
 
 #[derive(Parser, Debug)]
 struct Args {
-    #[arg(short, long)]
+    #[arg(long)]
     url: Url,
-    #[arg(short, long, default_value_t = 1)]
+    #[arg(long, default_value_t = 1)]
     depth_limit: usize,
-    #[arg(short, long, default_value_t = 100)]
+    #[arg(long, default_value_t = 100)]
     concurrency_limit: usize,
-    #[arg(short, long, default_value = "Mozilla/5.0")]
+    #[arg(long, default_value_t = 1000)]
+    request_timeout_ms: u64,
+    #[arg(long, default_value_t = 10)]
+    min_interval_ms: u64,
+    #[arg(long, default_value = "Mozilla/5.0")]
     user_agent: String,
-    #[arg(short, long, default_value_t = true)]
+    #[arg(long)]
     verbose: bool,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    let client = Client::builder().user_agent(args.user_agent).build()?;
+    let client = Client::builder()
+        .user_agent(args.user_agent)
+        .timeout(Duration::from_millis(args.request_timeout_ms))
+        .build()?;
     let base_path = args.url;
     let link_selector = Selector::parse("a").expect("failed to parse anchor tag selector");
 
@@ -38,6 +47,11 @@ async fn main() -> Result<()> {
 
     let semaphore = Arc::new(Semaphore::new(args.concurrency_limit));
     let mut join_set = JoinSet::new();
+    let failed_counter = Arc::new(Mutex::new(0));
+    let success_counter = Arc::new(Mutex::new(0));
+
+    let delay = Duration::from_millis(args.min_interval_ms);
+    let interval = Arc::new(Mutex::new(interval(delay)));
 
     loop {
         let next = {
@@ -55,22 +69,53 @@ async fn main() -> Result<()> {
             let client = client.clone();
             let link_selector = link_selector.clone();
 
+            let failed_counter = failed_counter.clone();
+            let success_counter = success_counter.clone();
+            let interval = interval.clone();
+
             join_set.spawn(async move {
                 let _permit = permit;
 
-                let response = client.get(&url).send().await;
-                if let Ok(resp) = response {
-                    if let Ok(body) = resp.text().await {
-                        let urls = extract_links_from_body(&body, &link_selector);
+                {
+                    let mut interval = interval.lock().await;
+                    interval.tick().await;
+                }
 
-                        let mut queue = queue.lock().await;
-                        queue.add(&urls, current_depth + 1);
-                        queue.done(&url);
-                    } else {
-                        eprintln!("Failed to read body from {url}");
+                let response = client.get(&url).send().await;
+                match response {
+                    Ok(resp) => {
+                        if let Ok(body) = resp.text().await {
+                            let urls = extract_links_from_body(&body, &link_selector);
+
+                            let mut queue = queue.lock().await;
+                            queue.add(&urls, current_depth + 1);
+                            queue.done(&url);
+
+                            if args.verbose {
+                                let mut success_counter = success_counter.lock().await;
+                                *success_counter += 1;
+                            }
+                        } else {
+                            eprintln!("Failed to read body from {url}");
+
+                            if args.verbose {
+                                let mut failed_counter = failed_counter.lock().await;
+                                *failed_counter += 1;
+                            }
+                        }
                     }
-                } else {
-                    eprintln!("Request failed for {url}");
+                    Err(err) => eprintln!("Request failed: {err}"),
+                }
+
+                if args.verbose {
+                    let success_counter = success_counter.lock().await;
+                    let failed_counter = failed_counter.lock().await;
+                    println!(
+                        "Request count: {}, success: {}, failed: {}",
+                        *success_counter + *failed_counter,
+                        success_counter,
+                        failed_counter
+                    )
                 }
             });
         } else {
