@@ -6,7 +6,6 @@ use std::{
     time::Duration,
 };
 
-use anyhow::Result;
 use clap::Parser;
 use reqwest::Client;
 use scraper::{Html, Selector};
@@ -40,7 +39,7 @@ struct Args {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
     let args = Args::parse();
 
     let html_directory = args.output_directory.join("html");
@@ -50,7 +49,8 @@ async fn main() -> Result<()> {
     let client = Client::builder()
         .user_agent(args.user_agent)
         .timeout(Duration::from_millis(args.request_timeout_ms))
-        .build()?;
+        .build()
+        .expect("failed to build client");
     let base_path = args.url;
     let link_selector = Selector::parse("a").expect("failed to parse anchor tag selector");
 
@@ -156,8 +156,6 @@ async fn main() -> Result<()> {
         let queue = queue.lock().await;
         println!("Visited {} URLs", queue.visited.len());
     }
-
-    Ok(())
 }
 
 type VisitDepth = usize;
@@ -248,12 +246,16 @@ fn extract_links_from_body(body: &str, link_selector: &Selector) -> Vec<String> 
         .collect()
 }
 
-async fn save_html(html_directory: &Path, url: &str, html: &str) -> Result<()> {
+async fn save_html(html_directory: &Path, url: &str, html: &str) -> Result<(), String> {
     let encoded_url = encode(url);
     let file_path = html_directory.join(format!("{encoded_url}.html"));
 
-    let mut file = File::create(file_path).await?;
-    file.write_all(html.as_bytes()).await?;
+    let mut file = File::create(file_path)
+        .await
+        .map_err(|err| err.to_string())?;
+    file.write_all(html.as_bytes())
+        .await
+        .map_err(|err| err.to_string())?;
 
     Ok(())
 }

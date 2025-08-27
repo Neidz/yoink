@@ -8,5 +8,4 @@ clap = { version = "4.5.41", features = ["derive"] }
 tokio = { version = "1.46.1", features = ["full"] }
 reqwest = "0.12.22"
 scraper = "0.18"
-anyhow = "1.0"
 url = "2.5.4"
