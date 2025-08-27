@@ -18,7 +18,6 @@ use tokio::{
     time::interval,
 };
 use url::Url;
-use urlencoding::encode;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -257,4 +256,15 @@ async fn save_html(html_directory: &Path, url: &str, html: &str) -> Result<()> {
     file.write_all(html.as_bytes()).await?;
 
     Ok(())
+}
+
+fn encode(url: &str) -> String {
+    url.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{:02X}", b),
+        })
+        .collect()
 }
