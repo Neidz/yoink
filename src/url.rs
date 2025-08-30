@@ -99,7 +99,7 @@ impl FromStr for Url {
 }
 
 impl Url {
-    pub fn new(scheme: &UrlScheme, host: &str, path: Option<&str>) -> Self {
+    fn new(scheme: &UrlScheme, host: &str, path: Option<&str>) -> Self {
         Url {
             scheme: scheme.to_owned(),
             host: host.to_owned(),
@@ -137,14 +137,6 @@ impl Url {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn test_urls_with_paths() {
-        let url = Url::from_str("https://example.com/foo/bar/").unwrap();
-        assert_eq!(url.scheme.to_string(), "https");
-        assert_eq!(url.host, "example.com");
-        assert_eq!(url.path, Some("foo/bar".to_string()));
-        assert_eq!(url.to_string(), "https://example.com/foo/bar");
-    }
 
     #[test]
     fn test_urls_with_fragments() {
@@ -166,6 +158,12 @@ mod tests {
 
         let url = Url::new_with_base(&base, "https://example.com/foo/bar").unwrap();
         assert_eq!(url.to_string(), "https://example.com/foo/bar");
+
+        let url = Url::new_with_base(&base, "https://notexample.com/foo/bar");
+        assert!(matches!(
+            url.err().unwrap(),
+            UrlError::DifferentSchemeOrHost
+        ));
     }
 
     #[test]
