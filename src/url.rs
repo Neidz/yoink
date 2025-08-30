@@ -51,6 +51,13 @@ impl TryFrom<&str> for UrlScheme {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Url {
+    pub scheme: UrlScheme,
+    pub host: String,
+    pub path: Option<String>,
+}
+
 impl fmt::Display for Url {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.path {
@@ -58,13 +65,6 @@ impl fmt::Display for Url {
             None => write!(f, "{}://{}", self.scheme, self.host),
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Url {
-    pub scheme: UrlScheme,
-    pub host: String,
-    pub path: Option<String>,
 }
 
 impl FromStr for Url {

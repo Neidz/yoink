@@ -1,5 +1,4 @@
 use std::{
-    collections::{HashSet, VecDeque},
     fs::create_dir_all,
     path::{Path, PathBuf},
     sync::Arc,
@@ -18,17 +17,16 @@ use tokio::{
 };
 use url::Url;
 
-use crate::encoding::urlencode;
+use crate::{encoding::urlencode, queue::Queue};
 
 mod encoding;
+mod queue;
 mod url;
 
 #[derive(Parser, Debug)]
 struct Args {
     #[arg(long)]
     url: Url,
-    #[arg(long, default_value_t = 100)]
-    depth_limit: usize,
     #[arg(long, default_value_t = 100)]
     concurrency_limit: usize,
     #[arg(long, default_value_t = 1000)]
@@ -59,10 +57,11 @@ async fn main() {
     let base_url = args.url;
     let link_selector = Selector::parse("a").expect("failed to parse anchor tag selector");
 
-    let queue = Arc::new(Mutex::new(Queue::new(base_url, args.depth_limit)));
+    let queue = Arc::new(Mutex::new(Queue::new(&base_url)));
 
     let semaphore = Arc::new(Semaphore::new(args.concurrency_limit));
     let mut join_set = JoinSet::new();
+
     let failed_counter = Arc::new(Mutex::new(0));
     let success_counter = Arc::new(Mutex::new(0));
 
@@ -75,7 +74,7 @@ async fn main() {
             queue.next()
         };
 
-        if let Some((url, current_depth)) = next {
+        if let Some(url) = next {
             let permit = semaphore
                 .clone()
                 .acquire_owned()
@@ -83,6 +82,7 @@ async fn main() {
                 .expect("failed to acquire permit from semaphore");
             let queue = queue.clone();
             let client = client.clone();
+            let base_url = base_url.clone();
             let link_selector = link_selector.clone();
             let html_directory = html_directory.clone();
 
@@ -106,7 +106,12 @@ async fn main() {
 
                             let mut queue = queue.lock().await;
 
-                            queue.add_raw_urls(&urls, current_depth + 1);
+                            for url_or_path in urls {
+                                if let Ok(url) = Url::new_with_base(&base_url, &url_or_path) {
+                                    queue.add(&url);
+                                }
+                            }
+
                             queue.done(&url);
 
                             if let Err(err) = save_html(&html_directory, &url, &body).await {
@@ -160,74 +165,7 @@ async fn main() {
 
     if args.verbose {
         let queue = queue.lock().await;
-        println!("Visited {} URLs", queue.visited.len());
-    }
-}
-
-type VisitDepth = usize;
-
-type QueueItem = (Url, VisitDepth);
-
-struct Queue {
-    depth_limit: usize,
-    base_url: Url,
-    to_visit: VecDeque<QueueItem>,
-    visited: HashSet<Url>,
-    visiting: HashSet<Url>,
-}
-
-impl Queue {
-    fn new(base_url: Url, depth_limit: usize) -> Self {
-        let mut queue = Queue {
-            depth_limit,
-            base_url: base_url.clone(),
-            to_visit: VecDeque::new(),
-            visited: HashSet::new(),
-            visiting: HashSet::new(),
-        };
-
-        queue.add(&base_url, 0);
-
-        queue
-    }
-
-    fn next(&mut self) -> Option<QueueItem> {
-        if let Some((visit_url, visit_depth)) = self.to_visit.pop_front() {
-            self.visiting.insert(visit_url.clone());
-
-            return Some((visit_url, visit_depth));
-        }
-
-        None
-    }
-
-    fn add(&mut self, url: &Url, depth: VisitDepth) {
-        if depth > self.depth_limit {
-            return;
-        }
-
-        if !self.visited.contains(&url) && !self.visiting.contains(&url) {
-            self.to_visit.push_back((url.clone(), depth));
-        }
-    }
-
-    fn add_raw_urls(&mut self, raw_urls: &[String], depth: VisitDepth) {
-        if depth > self.depth_limit {
-            return;
-        }
-
-        for raw_url in raw_urls {
-            if let Ok(url) = Url::new_with_base(&self.base_url, raw_url) {
-                if !self.visited.contains(&url) && !self.visiting.contains(&url) {
-                    self.to_visit.push_back((url.clone(), depth));
-                }
-            }
-        }
-    }
-
-    fn done(&mut self, url: &Url) {
-        self.visiting.remove(url);
-        self.visited.insert(url.to_owned());
+        println!("Visited {} URLs", queue.visited_amount());
     }
 }
 
