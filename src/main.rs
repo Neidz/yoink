@@ -18,6 +18,8 @@ use tokio::{
 };
 use url::Url;
 
+mod url;
+
 #[derive(Parser, Debug)]
 struct Args {
     #[arg(long)]
@@ -51,10 +53,10 @@ async fn main() {
         .timeout(Duration::from_millis(args.request_timeout_ms))
         .build()
         .expect("failed to build client");
-    let base_path = args.url;
+    let base_url = args.url;
     let link_selector = Selector::parse("a").expect("failed to parse anchor tag selector");
 
-    let queue = Arc::new(Mutex::new(Queue::new(base_path, args.depth_limit)));
+    let queue = Arc::new(Mutex::new(Queue::new(base_url, args.depth_limit)));
 
     let semaphore = Arc::new(Semaphore::new(args.concurrency_limit));
     let mut join_set = JoinSet::new();
@@ -93,14 +95,15 @@ async fn main() {
                     interval.tick().await;
                 }
 
-                let response = client.get(&url).send().await;
+                let response = client.get(&url.to_string()).send().await;
                 match response {
                     Ok(resp) => {
                         if let Ok(body) = resp.text().await {
                             let urls = extract_links_from_body(&body, &link_selector);
 
                             let mut queue = queue.lock().await;
-                            queue.add(&urls, current_depth + 1);
+
+                            queue.add_raw_urls(&urls, current_depth + 1);
                             queue.done(&url);
 
                             if let Err(err) = save_html(&html_directory, &url, &body).await {
@@ -159,29 +162,28 @@ async fn main() {
 }
 
 type VisitDepth = usize;
-type VisitUrl = String;
 
-type QueueItem = (VisitUrl, VisitDepth);
+type QueueItem = (Url, VisitDepth);
 
 struct Queue {
     depth_limit: usize,
-    base_path: Url,
+    base_url: Url,
     to_visit: VecDeque<QueueItem>,
-    visited: HashSet<VisitUrl>,
-    visiting: HashSet<VisitUrl>,
+    visited: HashSet<Url>,
+    visiting: HashSet<Url>,
 }
 
 impl Queue {
-    fn new(base_path: Url, depth_limit: usize) -> Self {
+    fn new(base_url: Url, depth_limit: usize) -> Self {
         let mut queue = Queue {
             depth_limit,
-            base_path: base_path.clone(),
+            base_url: base_url.clone(),
             to_visit: VecDeque::new(),
             visited: HashSet::new(),
             visiting: HashSet::new(),
         };
 
-        queue.add(&[base_path.to_string()], 0);
+        queue.add(&base_url, 0);
 
         queue
     }
@@ -196,45 +198,34 @@ impl Queue {
         None
     }
 
-    fn add(&mut self, urls: &[String], depth: VisitDepth) {
+    fn add(&mut self, url: &Url, depth: VisitDepth) {
         if depth > self.depth_limit {
             return;
         }
 
-        for url in urls {
-            if let Some(url) = normalize_and_filter_url(&self.base_path, url) {
+        if !self.visited.contains(&url) && !self.visiting.contains(&url) {
+            self.to_visit.push_back((url.clone(), depth));
+        }
+    }
+
+    fn add_raw_urls(&mut self, raw_urls: &[String], depth: VisitDepth) {
+        if depth > self.depth_limit {
+            return;
+        }
+
+        for raw_url in raw_urls {
+            if let Ok(url) = Url::new_with_base(&self.base_url, raw_url) {
                 if !self.visited.contains(&url) && !self.visiting.contains(&url) {
-                    self.to_visit.push_back((url.to_string(), depth));
+                    self.to_visit.push_back((url.clone(), depth));
                 }
             }
         }
     }
 
-    fn done(&mut self, url: &str) {
+    fn done(&mut self, url: &Url) {
         self.visiting.remove(url);
         self.visited.insert(url.to_owned());
     }
-}
-
-fn normalize_and_filter_url(base: &Url, url_or_path: &str) -> Option<String> {
-    let url = match Url::parse(url_or_path) {
-        Ok(url) => Ok(url),
-        Err(url::ParseError::RelativeUrlWithoutBase) => base.join(url_or_path),
-        Err(err) => Err(err),
-    };
-
-    let mut url = match url {
-        Ok(url) => url,
-        Err(_) => return None,
-    };
-
-    if url.domain() != base.domain() || url.scheme() != base.scheme() {
-        return None;
-    }
-
-    url.set_fragment(None);
-
-    Some(url.to_string())
 }
 
 fn extract_links_from_body(body: &str, link_selector: &Selector) -> Vec<String> {
@@ -246,8 +237,8 @@ fn extract_links_from_body(body: &str, link_selector: &Selector) -> Vec<String> 
         .collect()
 }
 
-async fn save_html(html_directory: &Path, url: &str, html: &str) -> Result<(), String> {
-    let encoded_url = encode(url);
+async fn save_html(html_directory: &Path, url: &Url, html: &str) -> Result<(), String> {
+    let encoded_url = encode(&url.to_string());
     let file_path = html_directory.join(format!("{encoded_url}.html"));
 
     let mut file = File::create(file_path)
