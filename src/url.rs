@@ -27,15 +27,15 @@ impl fmt::Display for UrlError {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum UrlScheme {
-    HTTP,
-    HTTPS,
+    Http,
+    Https,
 }
 
 impl fmt::Display for UrlScheme {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            UrlScheme::HTTPS => write!(f, "https"),
-            UrlScheme::HTTP => write!(f, "http"),
+            UrlScheme::Https => write!(f, "https"),
+            UrlScheme::Http => write!(f, "http"),
         }
     }
 }
@@ -44,8 +44,8 @@ impl TryFrom<&str> for UrlScheme {
     type Error = UrlError;
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         match value {
-            "http" => Ok(UrlScheme::HTTP),
-            "https" => Ok(UrlScheme::HTTPS),
+            "http" => Ok(UrlScheme::Http),
+            "https" => Ok(UrlScheme::Https),
             _ => Err(UrlError::InvalidScheme),
         }
     }

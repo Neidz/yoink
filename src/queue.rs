@@ -16,13 +16,13 @@ impl Queue {
             visiting: HashSet::new(),
         };
 
-        queue.add(&base_url);
+        queue.add(base_url);
 
         queue
     }
 
     pub fn add(&mut self, url: &Url) {
-        if !self.visited.contains(&url) && !self.visiting.contains(&url) {
+        if !self.visited.contains(url) && !self.visiting.contains(url) {
             self.to_visit.push_back(url.to_owned());
         }
     }

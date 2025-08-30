@@ -98,7 +98,7 @@ async fn main() {
                     interval.tick().await;
                 }
 
-                let response = client.get(&url.to_string()).send().await;
+                let response = client.get(url.to_string()).send().await;
                 match response {
                     Ok(resp) => {
                         if let Ok(body) = resp.text().await {
