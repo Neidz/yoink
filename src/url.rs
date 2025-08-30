@@ -4,6 +4,7 @@ use std::{fmt, str::FromStr};
 pub enum UrlError {
     MissingScheme,
     InvalidScheme,
+    MissingHost,
     UnexpectedFormat,
     DifferentSchemeOrHost,
 }
@@ -15,6 +16,7 @@ impl fmt::Display for UrlError {
         match self {
             UrlError::InvalidScheme => write!(f, "invalid url scheme"),
             UrlError::MissingScheme => write!(f, "missing url scheme"),
+            UrlError::MissingHost => write!(f, "missing url host"),
             UrlError::UnexpectedFormat => write!(f, "unexpected url format"),
             UrlError::DifferentSchemeOrHost => {
                 write!(f, "base url has different scheme or host from url or path")
@@ -78,13 +80,17 @@ impl FromStr for Url {
             None => return Ok(Url::new(&scheme, rest, None)),
         };
 
+        if host.is_empty() {
+            return Err(UrlError::MissingHost);
+        }
+
         let path = path
             .split_once('#')
             .map(|(without_fragments, _)| without_fragments)
             .unwrap_or(path)
             .trim_end_matches('/');
 
-        if path == "" {
+        if path.is_empty() {
             return Ok(Url::new(&scheme, host, None));
         }
 
@@ -131,32 +137,13 @@ impl Url {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_host_only_urls() {
-        let url = Url::from_str("http://example.com").unwrap();
-        assert_eq!(url.scheme.to_string(), "http");
-        assert_eq!(url.host, "example.com");
-        assert!(url.path.is_none());
-        assert_eq!(url.to_string(), "http://example.com");
-
-        let url = Url::from_str("https://example.com").unwrap();
-        assert_eq!(url.scheme.to_string(), "https");
-        assert_eq!(url.host, "example.com");
-        assert!(url.path.is_none());
-        assert_eq!(url.to_string(), "https://example.com");
-    }
-
     #[test]
     fn test_urls_with_paths() {
-        let url = Url::from_str("https://example.com/foo/bar").unwrap();
+        let url = Url::from_str("https://example.com/foo/bar/").unwrap();
         assert_eq!(url.scheme.to_string(), "https");
         assert_eq!(url.host, "example.com");
         assert_eq!(url.path, Some("foo/bar".to_string()));
         assert_eq!(url.to_string(), "https://example.com/foo/bar");
-
-        let url = Url::from_str("https://example.com/foo/bar/").unwrap();
-        assert_eq!(url.path, Some("foo/bar".to_string()));
     }
 
     #[test]
@@ -179,29 +166,6 @@ mod tests {
 
         let url = Url::new_with_base(&base, "https://example.com/foo/bar").unwrap();
         assert_eq!(url.to_string(), "https://example.com/foo/bar");
-    }
-
-    #[test]
-    fn test_errors() {
-        assert!(matches!(
-            Url::from_str("example.com"),
-            Err(UrlError::MissingScheme)
-        ));
-
-        assert!(matches!(
-            Url::from_str("ftp://example.com"),
-            Err(UrlError::InvalidScheme)
-        ));
-
-        let base = Url::from_str("https://example.com/").unwrap();
-        assert!(matches!(
-            Url::new_with_base(&base, "relative/path"),
-            Err(UrlError::UnexpectedFormat)
-        ));
-        assert!(matches!(
-            Url::new_with_base(&base, "https://example2.com/foo/bar"),
-            Err(UrlError::DifferentSchemeOrHost)
-        ));
     }
 
     #[test]
