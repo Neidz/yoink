@@ -20,6 +20,7 @@ use url::Url;
 use crate::{encoding::urlencode, queue::Queue};
 
 mod encoding;
+mod journal;
 mod queue;
 mod url;
 
