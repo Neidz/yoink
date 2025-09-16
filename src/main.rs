@@ -17,7 +17,7 @@ use tokio::{
 };
 use url::Url;
 
-use crate::{encoding::urlencode, queue::Queue};
+use crate::{encoding::url_encode, queue::Queue};
 
 mod encoding;
 mod journal;
@@ -180,7 +180,7 @@ fn extract_links_from_body(body: &str, link_selector: &Selector) -> Vec<String> 
 }
 
 async fn save_html(html_directory: &Path, url: &Url, html: &str) -> Result<(), String> {
-    let encoded_url = urlencode(&url.to_string());
+    let encoded_url = url_encode(&url.to_string());
     let file_path = html_directory.join(format!("{encoded_url}.html"));
 
     let mut file = File::create(file_path)
