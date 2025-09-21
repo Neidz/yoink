@@ -63,13 +63,13 @@ async fn main() {
     let base_url = args.url;
     let link_selector = Selector::parse("a").expect("Failed to parse anchor tag selector");
 
-    let jorunal_history = Journal::load_history(journal_path.clone());
+    let journal_history = Journal::load_history(journal_path.clone());
     let queue = Arc::new(Mutex::new(Queue::new_with_initial(
         &base_url,
-        jorunal_history.pending,
-        jorunal_history.processing,
-        jorunal_history.processed,
-        jorunal_history.failed,
+        journal_history.pending,
+        journal_history.processing,
+        journal_history.processed,
+        journal_history.failed,
     )));
     let (journal, journal_task) = Journal::new(journal_path);
     let journal_handle = tokio::spawn(journal_task);
@@ -100,6 +100,11 @@ async fn main() {
             let html_directory = html_directory.clone();
 
             let interval = interval.clone();
+
+            if args.verbose {
+                let queue = queue.lock().await;
+                queue.print_summary();
+            }
 
             journal.send(JournalEntry::Processing {
                 url: url.to_owned(),
@@ -155,17 +160,14 @@ async fn main() {
                     journal.send(JournalEntry::Failed {
                         url: url.to_owned(),
                     });
-                    println!("Failed to save html for {url}: {err}")
+                    println!("Failed to save html for {url}: {err}");
+                    return;
                 }
 
                 queue.mark_as_processed(&url);
                 journal.send(JournalEntry::Processed {
                     url: url.to_owned(),
                 });
-
-                if args.verbose {
-                    queue.print_summary();
-                }
             });
         } else {
             if join_set.is_empty() {
