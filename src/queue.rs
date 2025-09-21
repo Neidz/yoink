@@ -20,10 +20,10 @@ impl Queue {
     ) -> Self {
         let mut queue = Queue {
             pending: pending.clone().into_iter().collect(),
-            pending_set: pending.to_owned().into_iter().collect(),
-            processing: processing.to_owned().into_iter().collect(),
-            processed: processed.to_owned().into_iter().collect(),
-            failed: failed.to_owned().into_iter().collect(),
+            pending_set: pending.iter().cloned().collect(),
+            processing: processing.iter().cloned().collect(),
+            processed: processed.iter().cloned().collect(),
+            failed: failed.iter().cloned().collect(),
         };
 
         queue.add_pending(base_url);

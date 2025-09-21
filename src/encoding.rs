@@ -14,7 +14,7 @@ const BASE64_TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrst
 
 #[allow(unused)]
 pub fn base64_encode(input: &[u8]) -> String {
-    let mut out = String::with_capacity(((input.len() + 2) / 3) * 4);
+    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
 
     let mut i = 0;
     while i + 3 <= input.len() {
@@ -59,9 +59,9 @@ pub fn base64_encode(input: &[u8]) -> String {
 #[allow(unused)]
 #[derive(Debug, PartialEq)]
 pub enum DecodeError {
-    InvalidLength,
-    InvalidCharacter { ch: char, index: usize },
-    InvalidPadding,
+    Length,
+    Character { ch: char, index: usize },
+    Padding,
 }
 
 #[allow(unused)]
@@ -73,15 +73,15 @@ pub fn base64_decode(input: &str) -> Result<Vec<u8>, DecodeError> {
     }
 
     if clean.len() % 4 != 0 {
-        return Err(DecodeError::InvalidLength);
+        return Err(DecodeError::Length);
     }
 
     let pad = clean.iter().rev().take_while(|&&c| c == '=').count();
     if pad > 2 {
-        return Err(DecodeError::InvalidPadding);
+        return Err(DecodeError::Padding);
     }
-    if clean[..clean.len() - pad].iter().any(|&c| c == '=') {
-        return Err(DecodeError::InvalidPadding);
+    if clean[..clean.len() - pad].contains(&'=') {
+        return Err(DecodeError::Padding);
     }
 
     let mut out = Vec::with_capacity(clean.len() / 4 * 3 - pad);
@@ -96,7 +96,7 @@ pub fn base64_decode(input: &str) -> Result<Vec<u8>, DecodeError> {
                 match val_from_base64_char(ch) {
                     Some(v) => vals[j] = v,
                     None => {
-                        return Err(DecodeError::InvalidCharacter {
+                        return Err(DecodeError::Character {
                             ch,
                             index: chunk_idx * 4 + j,
                         });

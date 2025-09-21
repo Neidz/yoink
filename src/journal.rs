@@ -38,10 +38,10 @@ impl FromStr for JournalEntry {
         let url = Url::from_str(url).map_err(|err| err.to_string())?;
 
         match status {
-            "pending" => Ok(JournalEntry::Pending { url: url }),
-            "processing" => Ok(JournalEntry::Processing { url: url }),
-            "processed" => Ok(JournalEntry::Processed { url: url }),
-            "failed" => Ok(JournalEntry::Failed { url: url }),
+            "pending" => Ok(JournalEntry::Pending { url }),
+            "processing" => Ok(JournalEntry::Processing { url }),
+            "processed" => Ok(JournalEntry::Processed { url }),
+            "failed" => Ok(JournalEntry::Failed { url }),
             _ => Err("invalid status".to_owned()),
         }
     }
@@ -65,7 +65,7 @@ impl Journal {
                 .expect("Failed to create journal file");
 
             while let Some(entry) = rx.recv().await {
-                let line = format!("{}\n", entry.to_string());
+                let line = format!("{entry}\n");
                 if let Err(err) = f.write_all(line.as_bytes()).await {
                     eprintln!("Failed to write journal entry to the file: {err}");
                 }
@@ -138,14 +138,14 @@ impl Journal {
         let pending: Vec<_> = maybe_pending
             .into_iter()
             .filter(|entry| {
-                !maybe_processing.contains(&entry)
-                    && !processed.contains(&entry)
-                    && !failed.contains(&entry)
+                !maybe_processing.contains(entry)
+                    && !processed.contains(entry)
+                    && !failed.contains(entry)
             })
             .collect();
         let processing: Vec<_> = maybe_processing
             .into_iter()
-            .filter(|entry| !processed.contains(&entry) && !failed.contains(&entry))
+            .filter(|entry| !processed.contains(entry) && !failed.contains(entry))
             .collect();
         let processed: Vec<_> = processed.into_iter().collect();
         let failed: Vec<_> = failed.into_iter().collect();
