@@ -9,8 +9,10 @@ pub fn url_encode(val: &str) -> String {
         .collect()
 }
 
+#[allow(unused)]
 const BASE64_TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
+#[allow(unused)]
 pub fn base64_encode(input: &[u8]) -> String {
     let mut out = String::with_capacity(((input.len() + 2) / 3) * 4);
 
@@ -62,6 +64,7 @@ pub enum DecodeError {
     InvalidPadding,
 }
 
+#[allow(unused)]
 pub fn base64_decode(input: &str) -> Result<Vec<u8>, DecodeError> {
     let clean: Vec<char> = input.chars().filter(|c| !c.is_ascii_whitespace()).collect();
 
@@ -121,6 +124,7 @@ pub fn base64_decode(input: &str) -> Result<Vec<u8>, DecodeError> {
     Ok(out)
 }
 
+#[allow(unused)]
 fn val_from_base64_char(c: char) -> Option<u8> {
     match c {
         'A'..='Z' => Some((c as u8) - b'A'),

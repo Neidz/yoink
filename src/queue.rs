@@ -3,17 +3,19 @@ use std::collections::{HashSet, VecDeque};
 use crate::url::Url;
 
 pub struct Queue {
-    to_visit: VecDeque<Url>,
-    visited: HashSet<Url>,
-    visiting: HashSet<Url>,
+    pending: VecDeque<Url>,
+    pending_set: HashSet<Url>,
+    processing: HashSet<Url>,
+    processed: HashSet<Url>,
 }
 
 impl Queue {
     pub fn new(base_url: &Url) -> Self {
         let mut queue = Queue {
-            to_visit: VecDeque::new(),
-            visited: HashSet::new(),
-            visiting: HashSet::new(),
+            pending: VecDeque::new(),
+            pending_set: HashSet::new(),
+            processing: HashSet::new(),
+            processed: HashSet::new(),
         };
 
         queue.add(base_url);
@@ -22,14 +24,19 @@ impl Queue {
     }
 
     pub fn add(&mut self, url: &Url) {
-        if !self.visited.contains(url) && !self.visiting.contains(url) {
-            self.to_visit.push_back(url.to_owned());
+        if !self.pending_set.contains(url)
+            && !self.processed.contains(url)
+            && !self.processing.contains(url)
+        {
+            self.pending.push_back(url.to_owned());
+            self.pending_set.insert(url.to_owned());
         }
     }
 
     pub fn next(&mut self) -> Option<Url> {
-        if let Some(url) = self.to_visit.pop_front() {
-            self.visiting.insert(url.clone());
+        if let Some(url) = self.pending.pop_front() {
+            self.pending_set.remove(&url);
+            self.processing.insert(url.clone());
 
             return Some(url);
         }
@@ -38,11 +45,11 @@ impl Queue {
     }
 
     pub fn done(&mut self, url: &Url) {
-        self.visiting.remove(url);
-        self.visited.insert(url.to_owned());
+        self.processing.remove(url);
+        self.processed.insert(url.to_owned());
     }
 
-    pub fn visited_amount(&self) -> usize {
-        self.visited.len()
+    pub fn processed_amount(&self) -> usize {
+        self.processed.len()
     }
 }

@@ -166,7 +166,7 @@ async fn main() {
 
     if args.verbose {
         let queue = queue.lock().await;
-        println!("Visited {} URLs", queue.visited_amount());
+        println!("Visited {} URLs", queue.processed_amount());
     }
 }
 

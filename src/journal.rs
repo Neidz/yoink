@@ -1,14 +1,42 @@
-use std::{fs::File, path::PathBuf};
+use std::{fmt, path::PathBuf, str::FromStr};
 
 use tokio::{fs, sync::mpsc};
 
 use crate::url::Url;
 
 pub enum JournalEntry {
-    Queued { url: Url },
-    Started { url: Url },
-    Finished { url: Url },
-    Failed { url: Url, error: Option<String> },
+    Pending { url: Url },
+    Processing { url: Url },
+    Processed { url: Url },
+    Failed { url: Url },
+}
+
+impl fmt::Display for JournalEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            JournalEntry::Pending { url } => write!(f, "pending;{url}"),
+            JournalEntry::Processing { url } => write!(f, "processing;{url}"),
+            JournalEntry::Processed { url } => write!(f, "processed;{url}"),
+            JournalEntry::Failed { url } => write!(f, "failed;{url}"),
+        }
+    }
+}
+
+impl FromStr for JournalEntry {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (status, url) = s.split_once(';').ok_or("invalid entry".to_owned())?;
+        let url = Url::from_str(url).map_err(|err| err.to_string())?;
+
+        match status {
+            "pending" => Ok(JournalEntry::Pending { url: url }),
+            "processing" => Ok(JournalEntry::Processing { url: url }),
+            "processed" => Ok(JournalEntry::Processed { url: url }),
+            "failed" => Ok(JournalEntry::Failed { url: url }),
+            _ => Err("invalid status".to_owned()),
+        }
+    }
 }
 
 pub struct Journal {
