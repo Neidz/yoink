@@ -7,23 +7,31 @@ pub struct Queue {
     pending_set: HashSet<Url>,
     processing: HashSet<Url>,
     processed: HashSet<Url>,
+    failed: HashSet<Url>,
 }
 
 impl Queue {
-    pub fn new(base_url: &Url) -> Self {
+    pub fn new_with_initial(
+        base_url: &Url,
+        pending: Vec<Url>,
+        processing: Vec<Url>,
+        processed: Vec<Url>,
+        failed: Vec<Url>,
+    ) -> Self {
         let mut queue = Queue {
-            pending: VecDeque::new(),
-            pending_set: HashSet::new(),
-            processing: HashSet::new(),
-            processed: HashSet::new(),
+            pending: pending.clone().into_iter().collect(),
+            pending_set: pending.to_owned().into_iter().collect(),
+            processing: processing.to_owned().into_iter().collect(),
+            processed: processed.to_owned().into_iter().collect(),
+            failed: failed.to_owned().into_iter().collect(),
         };
 
-        queue.add(base_url);
+        queue.add_pending(base_url);
 
         queue
     }
 
-    pub fn add(&mut self, url: &Url) {
+    pub fn add_pending(&mut self, url: &Url) {
         if !self.pending_set.contains(url)
             && !self.processed.contains(url)
             && !self.processing.contains(url)
@@ -44,12 +52,27 @@ impl Queue {
         None
     }
 
-    pub fn done(&mut self, url: &Url) {
+    pub fn mark_as_processed(&mut self, url: &Url) {
         self.processing.remove(url);
         self.processed.insert(url.to_owned());
     }
 
-    pub fn processed_amount(&self) -> usize {
-        self.processed.len()
+    pub fn mark_as_failed(&mut self, url: &Url) {
+        self.processing.remove(url);
+        self.failed.insert(url.to_owned());
+    }
+
+    pub fn print_summary(&self) {
+        println!(
+            "Total: {}, pending: {}, processing: {}, processed: {}, failed: {}",
+            self.pending_set.len()
+                + self.processing.len()
+                + self.processed.len()
+                + self.failed.len(),
+            self.pending.len(),
+            self.processing.len(),
+            self.processed.len(),
+            self.failed.len()
+        );
     }
 }

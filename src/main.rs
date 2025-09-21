@@ -17,7 +17,11 @@ use tokio::{
 };
 use url::Url;
 
-use crate::{encoding::url_encode, queue::Queue};
+use crate::{
+    encoding::url_encode,
+    journal::{Journal, JournalEntry},
+    queue::Queue,
+};
 
 mod encoding;
 mod journal;
@@ -47,24 +51,31 @@ async fn main() {
     let args = Args::parse();
 
     let html_directory = args.output_directory.join("html");
-    create_dir_all(&html_directory).expect("failed to create output directory");
+    let journal_path = args.output_directory.join("journal.log");
+    create_dir_all(&html_directory).expect("Failed to create output directory");
     let html_directory = Arc::new(html_directory);
 
     let client = Client::builder()
         .user_agent(args.user_agent)
         .timeout(Duration::from_millis(args.request_timeout_ms))
         .build()
-        .expect("failed to build client");
+        .expect("Failed to build client");
     let base_url = args.url;
-    let link_selector = Selector::parse("a").expect("failed to parse anchor tag selector");
+    let link_selector = Selector::parse("a").expect("Failed to parse anchor tag selector");
 
-    let queue = Arc::new(Mutex::new(Queue::new(&base_url)));
+    let jorunal_history = Journal::load_history(journal_path.clone());
+    let queue = Arc::new(Mutex::new(Queue::new_with_initial(
+        &base_url,
+        jorunal_history.pending,
+        jorunal_history.processing,
+        jorunal_history.processed,
+        jorunal_history.failed,
+    )));
+    let (journal, journal_task) = Journal::new(journal_path);
+    let journal_handle = tokio::spawn(journal_task);
 
     let semaphore = Arc::new(Semaphore::new(args.concurrency_limit));
     let mut join_set = JoinSet::new();
-
-    let failed_counter = Arc::new(Mutex::new(0));
-    let success_counter = Arc::new(Mutex::new(0));
 
     let delay = Duration::from_millis(args.min_interval_ms);
     let interval = Arc::new(Mutex::new(interval(delay)));
@@ -80,16 +91,19 @@ async fn main() {
                 .clone()
                 .acquire_owned()
                 .await
-                .expect("failed to acquire permit from semaphore");
+                .expect("Failed to acquire permit from semaphore");
             let queue = queue.clone();
+            let mut journal = journal.clone();
             let client = client.clone();
             let base_url = base_url.clone();
             let link_selector = link_selector.clone();
             let html_directory = html_directory.clone();
 
-            let failed_counter = failed_counter.clone();
-            let success_counter = success_counter.clone();
             let interval = interval.clone();
+
+            journal.send(JournalEntry::Processing {
+                url: url.to_owned(),
+            });
 
             join_set.spawn(async move {
                 let _permit = permit;
@@ -99,54 +113,58 @@ async fn main() {
                     interval.tick().await;
                 }
 
-                let response = client.get(url.to_string()).send().await;
-                match response {
-                    Ok(resp) => {
-                        if let Ok(body) = resp.text().await {
-                            let urls = extract_links_from_body(&body, &link_selector);
-
-                            let mut queue = queue.lock().await;
-
-                            for url_or_path in urls {
-                                if let Ok(url) = Url::new_with_base(&base_url, &url_or_path) {
-                                    queue.add(&url);
-                                }
-                            }
-
-                            queue.done(&url);
-
-                            if let Err(err) = save_html(&html_directory, &url, &body).await {
-                                eprintln!("Failed to save html from {url}: {err}");
-
-                                if args.verbose {
-                                    let mut failed_counter = failed_counter.lock().await;
-                                    *failed_counter += 1;
-                                }
-                            } else if args.verbose {
-                                let mut success_counter = success_counter.lock().await;
-                                *success_counter += 1;
-                            }
-                        } else {
-                            eprintln!("Failed to read body from {url}");
-
-                            if args.verbose {
-                                let mut failed_counter = failed_counter.lock().await;
-                                *failed_counter += 1;
-                            }
-                        }
+                let resp = match client.get(url.to_string()).send().await {
+                    Ok(r) => r,
+                    Err(err) => {
+                        let mut queue = queue.lock().await;
+                        queue.mark_as_failed(&url);
+                        journal.send(JournalEntry::Failed {
+                            url: url.to_owned(),
+                        });
+                        eprintln!("Request failed for {url}: {err}");
+                        return;
                     }
-                    Err(err) => eprintln!("Request failed: {err}"),
+                };
+                let mut queue = queue.lock().await;
+
+                let body = match resp.text().await {
+                    Ok(b) => b,
+                    Err(err) => {
+                        queue.mark_as_failed(&url);
+                        journal.send(JournalEntry::Failed {
+                            url: url.to_owned(),
+                        });
+                        eprintln!("Failed to read body for {url}: {err}");
+                        return;
+                    }
+                };
+
+                let urls = extract_links_from_body(&body, &link_selector);
+
+                for url_or_path in urls {
+                    if let Ok(url) = Url::new_with_base(&base_url, &url_or_path) {
+                        queue.add_pending(&url);
+                        journal.send(JournalEntry::Pending {
+                            url: url.to_owned(),
+                        });
+                    }
                 }
 
+                if let Err(err) = save_html(&html_directory, &url, &body).await {
+                    queue.mark_as_failed(&url);
+                    journal.send(JournalEntry::Failed {
+                        url: url.to_owned(),
+                    });
+                    println!("Failed to save html for {url}: {err}")
+                }
+
+                queue.mark_as_processed(&url);
+                journal.send(JournalEntry::Processed {
+                    url: url.to_owned(),
+                });
+
                 if args.verbose {
-                    let success_counter = success_counter.lock().await;
-                    let failed_counter = failed_counter.lock().await;
-                    println!(
-                        "Request count: {}, success: {}, failed: {}",
-                        *success_counter + *failed_counter,
-                        success_counter,
-                        failed_counter
-                    )
+                    queue.print_summary();
                 }
             });
         } else {
@@ -160,13 +178,13 @@ async fn main() {
 
     while let Some(res) = join_set.join_next().await {
         if let Err(err) = res {
-            eprintln!("Task failed: {err:?}");
+            eprintln!("Crawl task failed: {err:?}");
         }
     }
 
-    if args.verbose {
-        let queue = queue.lock().await;
-        println!("Visited {} URLs", queue.processed_amount());
+    drop(journal);
+    if let Err(err) = journal_handle.await {
+        eprintln!("Jornal task failed: {err}");
     }
 }
 
